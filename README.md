@@ -1,3 +1,11 @@
+# Info
+
+Supported tarantool commands:
+
+* INSERT
+* REPLACE
+* CALL
+
 # Install
 
 ```
