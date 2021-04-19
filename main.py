@@ -3,6 +3,7 @@ from scapy.all import *
 import argparse
 import msgpack
 import json
+from base64 import b64encode
 
 MP_MAP_HEADER = 0x82
 
@@ -51,6 +52,15 @@ def get_iproto_payload(body):
 
 	return payload
 
+class Base64Encoder(json.JSONEncoder):
+	def default(self, o):
+		if isinstance(o, bytes):
+			try:
+				return o.decode('utf-8')
+			except:
+				return " ".join(["{:02x}".format(x) for x in o])
+		return json.JSONEncoder.default(self, o)
+
 def payload2hex(payload):
 	return ' '.join( '{:02x}'.format(x) for x in payload )
 
@@ -90,6 +100,7 @@ def parse_callback(fout, flush):
 		cursor = 0
 		while True:
 			item = {}
+			item_bsize = msgpack.unpackb(payload[cursor:5], raw=False)
 
 			header_begin = cursor + payload[cursor:].find(MP_MAP_HEADER)
 			body_begin = header_begin + 1 + payload[header_begin+1:].find(MP_MAP_HEADER)
@@ -99,10 +110,7 @@ def parse_callback(fout, flush):
 			if header_begin == -1 or body_begin == -1:
 				break
 
-			if next_mp_header == -1:
-				body_end = len(payload)
-			else:
-				body_end = body_begin + 1 + next_mp_header
+			body_end = header_begin + item_bsize
 
 			cursor = body_end
 
@@ -123,7 +131,7 @@ def parse_callback(fout, flush):
 				item["header_error"] = str(sys.exc_info()[0])
 
 			try:
-				iproto_body = msgpack.unpackb(body, raw=False)
+				iproto_body = msgpack.unpackb(body, raw=True)
 				item["body"] = get_iproto_payload(iproto_body)
 			except:
 				item["body_hex"] = payload2hex(payload[body_begin:body_end])
@@ -134,7 +142,7 @@ def parse_callback(fout, flush):
 			if next_mp_header == -1:
 				break
 
-		fout.write(json.dumps(request) + "\n")
+		fout.write(json.dumps(request, cls=Base64Encoder) + "\n")
 		if flush:
 			fout.flush()
 
@@ -150,4 +158,3 @@ args = parser.parse_args()
 fout = open(args.output, "w")
 
 sniff(iface=args.iface, filter="dst port " + args.port, prn=parse_callback(fout, True))
-
