@@ -29,3 +29,12 @@ optional arguments:
 $ sudo ./venv/bin/python main.py --iface lo --output result.file
 ```
 
+# Examples
+
+## Execute dump file to another tarantool instance
+
+Required [jq](https://stedolan.github.io/jq/)
+
+```
+$ jq -M .payload.hex < result.file | sed 's/"//g' | xxd -r -p | nc localhost 3301
+```
