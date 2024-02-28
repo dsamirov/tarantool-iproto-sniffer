@@ -3,6 +3,8 @@ from scapy.all import *
 import argparse
 import msgpack
 import json
+import sys
+from io import BytesIO
 from base64 import b64encode
 
 MP_MAP_HEADER = 0x82
@@ -71,6 +73,8 @@ def parse_callback(fout, flush):
 
 		layer_ip = pkt.getlayer("IP")
 		layer_tcp = pkt.getlayer("TCP")
+		if not layer_tcp:
+			return
 
 		payload = pkt.getlayer("Raw").load
 
@@ -90,57 +94,29 @@ def parse_callback(fout, flush):
 				},
 			},
 			"payload": {
-				"hex": payload2hex(payload),
+				# "hex": payload2hex(payload),
 				"iproto": [],
 			},
 		}
 
 		# Батчинг
 
-		cursor = 0
-		while True:
+		stream = BytesIO(payload)
+		msgs = [ u for u in msgpack.Unpacker(stream, raw=False) ]
+
+		# record is (size, header, body)
+		for i in range(0, len(msgs), 3):
+			item_bsize = msgs[i]
+			header = msgs[i+1]
+			body = msgs[i+2]
+
 			item = {}
-			item_bsize = msgpack.unpackb(payload[cursor:5], raw=False)
-
-			header_begin = cursor + payload[cursor:].find(MP_MAP_HEADER)
-			body_begin = header_begin + 1 + payload[header_begin+1:].find(MP_MAP_HEADER)
-
-			next_mp_header = payload[body_begin+1:].find(MP_MAP_HEADER)
-
-			if header_begin == -1 or body_begin == -1:
-				break
-
-			body_end = header_begin + item_bsize
-
-			cursor = body_end
-
-			header = payload[header_begin:body_begin]
-			if next_mp_header == -1:
-				body = payload[body_begin:body_end]
-			else:
-				body = payload[body_begin:body_end-5]
-
-			try:
-				iproto_header = msgpack.unpackb(header, raw=False)
-				item["header"] = {
-					"REQUEST_ID": iproto_header[1],
-					"COMMAND": IPROTO_COMMAND_NAMES[iproto_header[0]],
-				}
-			except:
-				item["header_hex"] = payload2hex(payload[header_begin:body_begin])
-				item["header_error"] = str(sys.exc_info()[0])
-
-			try:
-				iproto_body = msgpack.unpackb(body, raw=True)
-				item["body"] = get_iproto_payload(iproto_body)
-			except:
-				item["body_hex"] = payload2hex(payload[body_begin:body_end])
-				item["body_error"] = str(sys.exc_info()[0])
-
+			item["header"] = {
+				"SYNC_ID": header[1],
+				"COMMAND": IPROTO_COMMAND_NAMES[header[0]],
+			}
+			item["body"] = get_iproto_payload(body)
 			request["payload"]["iproto"].append(item)
-
-			if next_mp_header == -1:
-				break
 
 		fout.write(json.dumps(request, cls=Base64Encoder) + "\n")
 		if flush:
@@ -149,12 +125,15 @@ def parse_callback(fout, flush):
 	return iproto_parse
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--iface", help="interface", default="lo")
-parser.add_argument("--port", help="tarantool port", default="3301")
+parser.add_argument("-i", "--iface", help="interface", default="lo")
+parser.add_argument("--from-pcap", help="from pcap file")
+parser.add_argument("--filter", help="filter to pcap file (ex. port 3301)")
 parser.add_argument("--output", help="output filename", default="/dev/stdout")
 
 args = parser.parse_args()
-
 fout = open(args.output, "w")
 
-sniff(iface=args.iface, filter="dst port " + args.port, prn=parse_callback(fout, True))
+if args.from_pcap:
+	sniff(offline=args.from_pcap, filter=args.filter or "", prn=parse_callback(fout, True))
+else:
+	sniff(interface=args.iface, filter=args.filter or "", prn=parse_callback(fout, True))
