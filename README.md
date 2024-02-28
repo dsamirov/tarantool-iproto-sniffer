@@ -1,10 +1,18 @@
 # Info
 
-Supported tarantool commands:
+Supported tarantool protocol commands:
 
 * INSERT
 * REPLACE
 * CALL
+* EVAL
+* UPSERT
+* SELECT
+* CALL_16
+* AUTH
+* PING
+* JOIN
+* SUBSCRIBE
 
 # Install
 
